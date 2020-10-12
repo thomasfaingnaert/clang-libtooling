@@ -21,8 +21,17 @@ static llvm::cl::extrahelp
 
 // Matches for loops with initializers that are set to '0'
 StatementMatcher LoopMatcher =
-    forStmt(hasLoopInit(declStmt(hasSingleDecl(
-                varDecl(hasInitializer(integerLiteral(equals(0))))))))
+    forStmt(
+        hasLoopInit(declStmt(
+            hasSingleDecl(varDecl(hasInitializer(integerLiteral(equals(0))))))),
+        hasIncrement(unaryOperator(
+            hasOperatorName("++"),
+            hasUnaryOperand(declRefExpr(
+                to(varDecl(hasType(isInteger())).bind("incrementVariable")))))),
+        hasCondition(binaryOperator(hasOperatorName("<"),
+                                    hasLHS(ignoringParenImpCasts(declRefExpr(
+                                        to(varDecl(hasType(isInteger())))))),
+                                    hasRHS(expr(hasType(isInteger()))))))
         .bind("forLoop");
 
 class LoopPrinter : public MatchFinder::MatchCallback {
