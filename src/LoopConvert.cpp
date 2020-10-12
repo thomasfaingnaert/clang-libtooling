@@ -21,26 +21,60 @@ static llvm::cl::extrahelp
 
 // Matches for loops with initializers that are set to '0'
 StatementMatcher LoopMatcher =
-    forStmt(
-        hasLoopInit(declStmt(
-            hasSingleDecl(varDecl(hasInitializer(integerLiteral(equals(0))))))),
-        hasIncrement(unaryOperator(
-            hasOperatorName("++"),
-            hasUnaryOperand(declRefExpr(
-                to(varDecl(hasType(isInteger())).bind("incrementVariable")))))),
-        hasCondition(binaryOperator(hasOperatorName("<"),
-                                    hasLHS(ignoringParenImpCasts(declRefExpr(
-                                        to(varDecl(hasType(isInteger())))))),
-                                    hasRHS(expr(hasType(isInteger()))))))
+    forStmt(hasLoopInit(declStmt(
+                hasSingleDecl(varDecl(hasInitializer(integerLiteral(equals(0))))
+                                  .bind("initVarName")))),
+            hasIncrement(unaryOperator(
+                hasOperatorName("++"),
+                hasUnaryOperand(declRefExpr(
+                    to(varDecl(hasType(isInteger())).bind("incVarName")))))),
+            hasCondition(binaryOperator(
+                hasOperatorName("<"),
+                hasLHS(ignoringParenImpCasts(declRefExpr(
+                    to(varDecl(hasType(isInteger())).bind("condVarName"))))),
+                hasRHS(expr(hasType(isInteger()))))))
         .bind("forLoop");
+
+static bool areSameVariable(const clang::ValueDecl *First,
+                            const clang::ValueDecl *Second) {
+  return First && Second &&
+         First->getCanonicalDecl() == Second->getCanonicalDecl();
+}
+
+static bool areSameExpr(clang::ASTContext *Context, const clang::Expr *First, const clang::Expr *Second) {
+  if (!First || !Second)
+    return false;
+  llvm::FoldingSetNodeID FirstID, SecondID;
+  First->Profile(FirstID, *Context, true);
+  Second->Profile(SecondID, *Context, true);
+  return FirstID == SecondID;
+}
 
 class LoopPrinter : public MatchFinder::MatchCallback {
 public:
   virtual void run(const MatchFinder::MatchResult &Result) {
-    if (const clang::ForStmt *FS =
-            Result.Nodes.getNodeAs<clang::ForStmt>("forLoop")) {
-      FS->dump();
-    }
+    clang::ASTContext *Context = Result.Context;
+
+    const clang::ForStmt *FS =
+        Result.Nodes.getNodeAs<clang::ForStmt>("forLoop");
+
+    // We do not want to convert header files!
+    if (!FS ||
+        !Context->getSourceManager().isWrittenInMainFile(FS->getForLoc()))
+      return;
+
+    const clang::VarDecl *IncVar =
+        Result.Nodes.getNodeAs<clang::VarDecl>("incVarName");
+    const clang::VarDecl *CondVar =
+        Result.Nodes.getNodeAs<clang::VarDecl>("condVarName");
+    const clang::VarDecl *InitVar =
+        Result.Nodes.getNodeAs<clang::VarDecl>("initVarName");
+
+    // IncVar, CondVar, and InitVar must be the same
+    if (!areSameVariable(IncVar, CondVar) || !areSameVariable(IncVar, CondVar))
+      return;
+
+    llvm::outs() << "Potential array-based loop discovered.\n";
   }
 };
 
